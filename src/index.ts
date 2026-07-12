@@ -1,6 +1,12 @@
 export { RiseonlyBot } from './bot.js';
 export { ApiClient } from './client.js';
-export { RiseonlyError, RiseonlyNetworkError, RiseonlyTimeoutError } from './errors.js';
+export {
+  RiseonlyAbortError,
+  RiseonlyError,
+  RiseonlyNetworkError,
+  RiseonlyResponseError,
+  RiseonlyTimeoutError,
+} from './errors.js';
 export {
   CANONICAL_API_PREFIX,
   CHAT_ACTIONS,

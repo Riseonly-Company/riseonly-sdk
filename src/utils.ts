@@ -62,8 +62,12 @@ export function verifyInitData(botToken: string, encoded: string): InitDataField
     throw new Error('init data signature is invalid');
   }
 
-  const expiresAt = fields.expires_at ? Number(fields.expires_at) : undefined;
-  if (expiresAt !== undefined && Number.isFinite(expiresAt) && expiresAt < Date.now()) {
+  const authDate = Number(fields.auth_date);
+  const expiresAt = Number(fields.expires_at);
+  if (!Number.isSafeInteger(authDate) || !Number.isSafeInteger(expiresAt) || expiresAt <= authDate) {
+    throw new Error('init data timestamps are invalid');
+  }
+  if (expiresAt < Date.now()) {
     throw new Error('init data has expired');
   }
 

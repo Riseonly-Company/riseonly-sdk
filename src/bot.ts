@@ -7,9 +7,11 @@ import type {
   BotEvent,
   BotEventMap,
   BotOptions,
+  BotSetupOptions,
   CallbackQuery,
   Message,
   PollingOptions,
+  TextHandler,
   Update,
   WebhookServerOptions,
 } from './types/index.js';
@@ -30,6 +32,7 @@ export class RiseonlyBot extends ApiClient {
   private webhookOptions?: WebhookServerOptions;
   private polling = false;
   private pollingAbort?: AbortController;
+  private pollingTask?: Promise<void>;
   private offset = 0;
   private webhookServer?: Server;
 
@@ -78,6 +81,76 @@ export class RiseonlyBot extends ApiClient {
     return this.on(event, wrapper);
   }
 
+  command(commands: string | string[], handler: BotEventMap['message']): this {
+    const accepted = new Set(
+      (Array.isArray(commands) ? commands : [commands])
+        .map((command) => command.replace(/^\//, '').toLowerCase())
+        .filter(Boolean),
+    );
+    return this.on('message', async (message, update) => {
+      const text = message.text?.trim();
+      if (!text?.startsWith('/')) {
+        return;
+      }
+      const token = text.split(/\s+/, 1)[0]!.slice(1).split('@', 1)[0]!.toLowerCase();
+      if (accepted.has(token)) {
+        await handler(message, update);
+      }
+    });
+  }
+
+  hears(trigger: string | RegExp, handler: TextHandler): this {
+    return this.on('message', async (message, update) => {
+      if (message.text === undefined) {
+        return;
+      }
+      if (typeof trigger === 'string') {
+        if (message.text === trigger) {
+          await handler(message, null, update);
+        }
+        return;
+      }
+      trigger.lastIndex = 0;
+      const match = trigger.exec(message.text);
+      if (match) {
+        await handler(message, match, update);
+      }
+    });
+  }
+
+  action(trigger: string | RegExp, handler: BotEventMap['callback_query']): this {
+    return this.on('callback_query', async (query, update) => {
+      if (query.data === undefined) {
+        return;
+      }
+      const matches = typeof trigger === 'string'
+        ? query.data === trigger
+        : testPattern(trigger, query.data);
+      if (matches) {
+        await handler(query, update);
+      }
+    });
+  }
+
+  catch(handler: BotEventMap['error']): this {
+    return this.on('error', handler);
+  }
+
+  async setup(options: BotSetupOptions): Promise<void> {
+    if (options.commands) {
+      await this.setMyCommands({
+        commands: options.commands,
+        scope: options.commandScope,
+        language_code: options.languageCode,
+      });
+    }
+    if (options.webhook === false) {
+      await this.deleteWebhook();
+    } else if (options.webhook) {
+      await this.setWebhook(options.webhook);
+    }
+  }
+
   /**
    * Starts long polling for bot updates.
    */
@@ -88,7 +161,7 @@ export class RiseonlyBot extends ApiClient {
     this.polling = true;
     this.pollingOptions = { ...this.pollingOptions, ...options, autoStart: true };
     this.pollingAbort = new AbortController();
-    void this.pollLoop();
+    this.pollingTask = this.pollLoop();
   }
 
   /**
@@ -97,7 +170,17 @@ export class RiseonlyBot extends ApiClient {
   async stopPolling(): Promise<void> {
     this.polling = false;
     this.pollingAbort?.abort();
+    await this.pollingTask;
     this.pollingAbort = undefined;
+    this.pollingTask = undefined;
+  }
+
+  async launch(options: PollingOptions = {}): Promise<void> {
+    await this.startPolling(options);
+  }
+
+  async stop(): Promise<void> {
+    await Promise.all([this.stopPolling(), this.stopWebhook()]);
   }
 
   /**
@@ -109,6 +192,12 @@ export class RiseonlyBot extends ApiClient {
     const path = config.path ?? '/';
     const host = config.host ?? '0.0.0.0';
     const port = config.port ?? 3000;
+    if (!path.startsWith('/')) {
+      throw new Error('webhook path must start with /');
+    }
+    if (config.maxBodyBytes !== undefined && config.maxBodyBytes <= 0) {
+      throw new Error('maxBodyBytes must be positive');
+    }
 
     const handler = createWebhookHandler({
       secretToken: config.secretToken,
@@ -126,15 +215,16 @@ export class RiseonlyBot extends ApiClient {
         return;
       }
       try {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, config.maxBodyBytes);
         const result = await handler({
           headers: normalizeHeaders(req.headers),
           body,
         });
         respond(res, result.status, result.body);
       } catch (error) {
-        await this.emit('error', error);
-        respond(res, 500, { ok: false });
+        await this.emitError(error);
+        const status = error instanceof WebhookPayloadTooLargeError ? 413 : 500;
+        respond(res, status, { ok: false });
       }
     });
 
@@ -212,8 +302,8 @@ export class RiseonlyBot extends ApiClient {
           if (update.update_id < this.offset) {
             continue;
           }
-          this.offset = Math.max(this.offset, update.update_id + 1);
           await this.processUpdate(update);
+          this.offset = Math.max(this.offset, update.update_id + 1);
           processed += 1;
         }
         if (processed === 0) {
@@ -223,7 +313,11 @@ export class RiseonlyBot extends ApiClient {
         if (!this.polling || isAbortError(error)) {
           return;
         }
-        await this.emit('polling_error', error);
+        try {
+          await this.emit('polling_error', error);
+        } catch {
+          // The original update stays unacknowledged and is retried by offset.
+        }
         if (error instanceof RiseonlyError && error.retryAfter) {
           await sleep(error.retryAfter * 1000);
         } else {
@@ -237,11 +331,28 @@ export class RiseonlyBot extends ApiClient {
     event: T,
     ...args: Parameters<BotEventMap[T]>
   ): Promise<void> {
+    let firstError: unknown;
     for (const listener of [...this.listeners[event]]) {
       try {
         await (listener as (...inner: Parameters<BotEventMap[T]>) => void | Promise<void>)(...args);
       } catch (error) {
-        await this.emit('error', error);
+        firstError ??= error;
+        if (event !== 'error') {
+          await this.emitError(error);
+        }
+      }
+    }
+    if (firstError !== undefined) {
+      throw firstError;
+    }
+  }
+
+  private async emitError(error: unknown): Promise<void> {
+    for (const listener of [...this.listeners.error]) {
+      try {
+        await listener(error);
+      } catch {
+        continue;
       }
     }
   }
@@ -270,7 +381,12 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'RiseonlyAbortError');
+}
+
+function testPattern(pattern: RegExp, value: string): boolean {
+  pattern.lastIndex = 0;
+  return pattern.test(value);
 }
 
 function normalizeHeaders(
@@ -283,10 +399,19 @@ function normalizeHeaders(
   return normalized;
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+class WebhookPayloadTooLargeError extends Error {}
+
+async function readJsonBody(req: IncomingMessage, maxBodyBytes = 1024 * 1024): Promise<unknown> {
   const chunks: Buffer[] = [];
+  let received = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    received += buffer.length;
+    if (received > maxBodyBytes) {
+      req.resume();
+      throw new WebhookPayloadTooLargeError('webhook payload is too large');
+    }
+    chunks.push(buffer);
   }
   if (chunks.length === 0) {
     return {};

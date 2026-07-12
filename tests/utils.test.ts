@@ -18,9 +18,15 @@ import {
 const token = 'ro_test.secret';
 
 function signedInitData(fields: Record<string, string>): string {
-  const dataCheckString = buildInitDataCheckString(fields);
+  const now = Date.now();
+  const completeFields = {
+    auth_date: String(now),
+    expires_at: String(now + 60_000),
+    ...fields,
+  };
+  const dataCheckString = buildInitDataCheckString(completeFields);
   const hash = signInitData(token, dataCheckString);
-  const params = new URLSearchParams({ ...fields, hash });
+  const params = new URLSearchParams({ ...completeFields, hash });
   return params.toString();
 }
 
@@ -85,5 +91,20 @@ describe('webhook utils', () => {
     });
     expect(result.status).toBe(200);
     expect(onUpdate).toHaveBeenCalledOnce();
+  });
+
+  it('returns a retryable server error when the application handler fails', async () => {
+    const handler = createWebhookHandler({
+      secretToken: 'secret',
+      onUpdate: async () => {
+        throw new Error('database unavailable');
+      },
+    });
+    const result = await handler({
+      headers: { [WEBHOOK_SECRET_HEADER]: 'secret' },
+      body: { update_id: 1 },
+    });
+    expect(result.status).toBe(500);
+    expect(result.body).toMatchObject({ description: 'webhook handler failed' });
   });
 });

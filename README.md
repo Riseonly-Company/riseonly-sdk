@@ -15,14 +15,13 @@ import { RiseonlyBot } from '@riseonly/sdk';
 
 const bot = new RiseonlyBot(process.env.BOT_TOKEN, { polling: true });
 
-bot.on('message', async (message) => {
-  if (message.text === '/start') {
-    await bot.sendMessage({
-      chat_id: message.chat.id,
-      text: 'welcome to riseonly',
-    });
-  }
+bot.command('start', async (message) => {
+  await bot.reply(message, 'Welcome to Riseonly');
 });
+
+bot.hears(/hello/i, (message) => bot.reply(message, 'Hi!'));
+bot.action(/^track:/, (query) => bot.answer(query, 'Loading track…'));
+bot.catch((error) => console.error('Bot handler failed', error));
 ```
 
 ## Bot API client
@@ -37,7 +36,8 @@ const api = new ApiClient(process.env.BOT_TOKEN, {
 });
 
 const me = await api.getMe();
-await api.sendMessage({ chat_id: me.id, text: 'hello' });
+console.log(`Connected as @${me.username}`);
+await api.sendMessage({ chat_id: 'chat-id', text: 'hello' });
 ```
 
 ## Webhooks
@@ -65,7 +65,44 @@ await bot.startWebhook({
 });
 ```
 
-### Express / Fastify adapter
+Webhook handlers return a retryable HTTP 500 when your application handler fails. Updates are acknowledged only after handlers finish successfully.
+
+## Configure from code
+
+Keep bot commands and delivery configuration in source control instead of repeating setup by hand:
+
+```js
+await bot.setup({
+  commands: [
+    { command: 'start', description: 'Start the bot' },
+    { command: 'help', description: 'Show help' },
+  ],
+  webhook: false,
+});
+
+await bot.launch();
+```
+
+Use `webhook: { url, secret_token }` to configure webhook delivery instead. `bot.stop()` gracefully stops polling and the built-in webhook server.
+
+## Media metadata
+
+Remote HTTPS media can include metadata used by Riseonly clients:
+
+```js
+await bot.sendAudio({
+  url: 'https://cdn.example.com/song.mp3',
+  file_name: 'Artist - Song.mp3',
+  mime_type: 'audio/mpeg',
+  thumbnail_url: 'https://cdn.example.com/cover.jpg',
+  duration: 180,
+}, {
+  chat_id: 'chat-id',
+  caption: 'Artist — Song',
+});
+```
+
+## Express / Fastify webhook adapter
 
 ```js
 import express from 'express';
