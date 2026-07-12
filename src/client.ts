@@ -3,7 +3,13 @@ import {
   DEFAULT_API_BASE,
   IDEMPOTENCY_HEADER,
 } from './constants.js';
-import { RiseonlyError, RiseonlyNetworkError, RiseonlyTimeoutError } from './errors.js';
+import {
+  RiseonlyAbortError,
+  RiseonlyError,
+  RiseonlyNetworkError,
+  RiseonlyResponseError,
+  RiseonlyTimeoutError,
+} from './errors.js';
 import type {
   AnswerCallbackQueryOptions,
   ApiEnvelope,
@@ -47,8 +53,15 @@ export class ApiClient {
     }
     this.token = token.trim();
     this.baseUrl = (options.baseUrl ?? DEFAULT_API_BASE).replace(/\/$/, '');
-    this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+    const fetchImpl = options.fetch ?? globalThis.fetch;
+    if (typeof fetchImpl !== 'function') {
+      throw new Error('global fetch is unavailable; provide ClientOptions.fetch');
+    }
+    this.fetchImpl = options.fetch ? fetchImpl : fetchImpl.bind(globalThis);
     this.requestTimeoutMs = options.requestTimeoutMs ?? 60_000;
+    if (!Number.isFinite(this.requestTimeoutMs) || this.requestTimeoutMs <= 0) {
+      throw new Error('requestTimeoutMs must be a positive number');
+    }
     this.useCompatibleEndpoint = options.useCompatibleEndpoint ?? false;
   }
 
@@ -57,15 +70,21 @@ export class ApiClient {
    */
   async getCapabilities(signal?: AbortSignal): Promise<Capabilities> {
     const url = `${this.baseUrl}${CANONICAL_API_PREFIX}/capabilities`;
-    const response = await this.fetchImpl(url, {
+    const { response, body } = await this.fetchJson(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },
-      signal,
-    });
+    }, { signal });
     if (!response.ok) {
-      throw new RiseonlyNetworkError(`capabilities request failed with status ${response.status}`);
+      throw new RiseonlyResponseError(
+        `capabilities request failed with status ${response.status}`,
+        response.status,
+        serializeResponseBody(body),
+      );
     }
-    return response.json() as Promise<Capabilities>;
+    if (!isRecord(body) || !Array.isArray(body.methods)) {
+      throw new RiseonlyResponseError('capabilities response is invalid', response.status);
+    }
+    return body as unknown as Capabilities;
   }
 
   /**
@@ -98,34 +117,29 @@ export class ApiClient {
       headers[IDEMPOTENCY_HEADER] = options.requestId;
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
-    const signal = options.signal
-      ? AbortSignal.any([options.signal, controller.signal])
-      : controller.signal;
-
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, {
+    const { response, body } = await this.fetchJson(
+      url,
+      {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
-        signal,
-      });
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new RiseonlyTimeoutError();
-      }
-      throw new RiseonlyNetworkError('network request failed', error);
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    const body = (await response.json()) as ApiEnvelope<T>;
-    if (!body.ok) {
+      },
+      options,
+    );
+    if (isApiErrorResponse(body)) {
       throw RiseonlyError.fromApiResponse(body);
     }
-    return body;
+    if (!response.ok) {
+      throw new RiseonlyResponseError(
+        `Bot API request failed with status ${response.status}`,
+        response.status,
+        serializeResponseBody(body),
+      );
+    }
+    if (!isRecord(body) || body.ok !== true || !('result' in body)) {
+      throw new RiseonlyResponseError('Bot API response envelope is invalid', response.status);
+    }
+    return body as unknown as ApiEnvelope<T> & { ok: true; result: T };
   }
 
   async getMe(options?: RequestOptions): Promise<User> {
@@ -133,8 +147,8 @@ export class ApiClient {
   }
 
   async sendMessage(options: SendMessageOptions): Promise<Message> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<Message>('sendMessage', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<Message>('sendMessage', payload, request);
   }
 
   async sendPhoto(photo: MediaInput, options: SendMediaOptions): Promise<Message> {
@@ -162,33 +176,35 @@ export class ApiClient {
   }
 
   async editMessageText(options: EditMessageTextOptions): Promise<Message> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<Message>('editMessageText', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<Message>('editMessageText', payload, request);
   }
 
   async deleteMessage(options: DeleteMessageOptions): Promise<boolean> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<boolean>('deleteMessage', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<boolean>('deleteMessage', payload, request);
   }
 
   async sendChatAction(options: SendChatActionOptions): Promise<boolean> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<boolean>('sendChatAction', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<boolean>('sendChatAction', payload, request);
   }
 
   async getUpdates(options: GetUpdatesOptions = {}): Promise<Update[]> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<Update[]>('getUpdates', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    const serverTimeoutMs = (options.timeout ?? 0) * 1000 + 5_000;
+    request.timeoutMs ??= Math.max(this.requestTimeoutMs, serverTimeoutMs);
+    return this.callMethod<Update[]>('getUpdates', payload, request);
   }
 
   async setWebhook(options: SetWebhookOptions): Promise<SetWebhookResult> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<SetWebhookResult>('setWebhook', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<SetWebhookResult>('setWebhook', payload, request);
   }
 
   async deleteWebhook(options: DeleteWebhookOptions = {}): Promise<boolean> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<boolean>('deleteWebhook', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<boolean>('deleteWebhook', payload, request);
   }
 
   async getWebhookInfo(options?: RequestOptions): Promise<WebhookInfo> {
@@ -196,28 +212,28 @@ export class ApiClient {
   }
 
   async setMyCommands(options: SetMyCommandsOptions): Promise<boolean> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<boolean>('setMyCommands', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<boolean>('setMyCommands', payload, request);
   }
 
   async getMyCommands(options: GetMyCommandsOptions = {}): Promise<BotCommand[]> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<BotCommand[]>('getMyCommands', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<BotCommand[]>('getMyCommands', payload, request);
   }
 
   async deleteMyCommands(options: DeleteMyCommandsOptions = {}): Promise<boolean> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<boolean>('deleteMyCommands', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<boolean>('deleteMyCommands', payload, request);
   }
 
   async answerCallbackQuery(options: AnswerCallbackQueryOptions): Promise<boolean> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<boolean>('answerCallbackQuery', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<boolean>('answerCallbackQuery', payload, request);
   }
 
   async getChat(options: GetChatOptions): Promise<Chat> {
-    const { requestId, ...payload } = options;
-    return this.callMethod<Chat>('getChat', payload, { requestId });
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<Chat>('getChat', payload, request);
   }
 
   private async sendMedia(
@@ -226,26 +242,27 @@ export class ApiClient {
     media: MediaInput,
     options: SendMediaOptions,
   ): Promise<Message> {
-    const { requestId, ...payload } = options;
+    const { request, payload } = splitRequestOptions(options);
     return this.callMethod<Message>(
       method,
       {
         ...payload,
         [field]: this.normalizeMedia(media),
       },
-      { requestId },
+      request,
     );
   }
 
-  private normalizeMedia(media: MediaInput): string | Record<string, string> {
+  private normalizeMedia(media: MediaInput): string | Record<string, string | number> {
     if (typeof media === 'string') {
       return media;
     }
-    if (media.file_id) {
-      return media.file_id;
-    }
-    if (media.url) {
-      return media.url;
+    if (media.file_id || media.url) {
+      return Object.fromEntries(
+        Object.entries(media).filter((entry): entry is [string, string | number] =>
+          typeof entry[1] === 'string' || typeof entry[1] === 'number'
+        ),
+      );
     }
     throw new Error('media requires file_id or url');
   }
@@ -255,6 +272,97 @@ export class ApiClient {
       return `${this.baseUrl}/bot${this.token}/${method}`;
     }
     return `${this.baseUrl}${CANONICAL_API_PREFIX}/${method}`;
+  }
+
+  private async fetchJson(
+    url: string,
+    init: RequestInit,
+    options: Pick<RequestOptions, 'signal' | 'timeoutMs'> = {},
+  ): Promise<{ response: Response; body: unknown }> {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      throw new Error('timeoutMs must be a positive number');
+    }
+    const abortFromCaller = () => controller.abort(options.signal?.reason);
+    if (options.signal?.aborted) {
+      throw new RiseonlyAbortError('Request was aborted', options.signal.reason);
+    }
+    options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        if (timedOut) {
+          throw new RiseonlyTimeoutError();
+        }
+        throw new RiseonlyAbortError('Request was aborted', error);
+      }
+      throw new RiseonlyNetworkError('network request failed', error);
+    } finally {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', abortFromCaller);
+    }
+
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      throw new RiseonlyNetworkError('unable to read response body', error, response.status);
+    }
+    if (!text) {
+      throw new RiseonlyResponseError('Bot API returned an empty response', response.status);
+    }
+    try {
+      return { response, body: JSON.parse(text) as unknown };
+    } catch {
+      throw new RiseonlyResponseError(
+        'Bot API returned a non-JSON response',
+        response.status,
+        text.slice(0, 4_096),
+      );
+    }
+  }
+}
+
+function splitRequestOptions<T extends RequestOptions>(
+  options: T,
+): { request: RequestOptions; payload: Record<string, unknown> } {
+  const { requestId, signal, timeoutMs, ...payload } = options;
+  return {
+    request: { requestId, signal, timeoutMs },
+    payload: payload as Record<string, unknown>,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isApiErrorResponse(value: unknown): value is {
+  ok: false;
+  error_code: number;
+  description: string;
+  parameters?: { retry_after?: number };
+} {
+  return isRecord(value)
+    && value.ok === false
+    && typeof value.error_code === 'number'
+    && typeof value.description === 'string';
+}
+
+function serializeResponseBody(body: unknown): string | undefined {
+  try {
+    return JSON.stringify(body).slice(0, 4_096);
+  } catch {
+    return undefined;
   }
 }
 

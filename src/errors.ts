@@ -41,3 +41,22 @@ export class RiseonlyTimeoutError extends RiseonlyNetworkError {
     this.name = 'RiseonlyTimeoutError';
   }
 }
+
+export class RiseonlyAbortError extends RiseonlyNetworkError {
+  constructor(message = 'Request was aborted', cause?: unknown) {
+    super(message, cause, 499);
+    this.name = 'RiseonlyAbortError';
+  }
+}
+
+export class RiseonlyResponseError extends RiseonlyNetworkError {
+  readonly status: number;
+  readonly body?: string;
+
+  constructor(message: string, status: number, body?: string) {
+    super(message, undefined, status);
+    this.name = 'RiseonlyResponseError';
+    this.status = status;
+    this.body = body;
+  }
+}

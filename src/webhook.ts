@@ -1,3 +1,5 @@
+import { timingSafeEqual } from 'node:crypto';
+
 import { WEBHOOK_SECRET_HEADER } from './constants.js';
 import type { Update } from './types/index.js';
 
@@ -30,12 +32,20 @@ export function verifyWebhookSecret(
   if (!secretToken) {
     return true;
   }
-  const headerValue = headers[WEBHOOK_SECRET_HEADER] ?? headers[WEBHOOK_SECRET_HEADER.toLowerCase()];
+  const headerEntry = Object.entries(headers).find(
+    ([name]) => name.toLowerCase() === WEBHOOK_SECRET_HEADER,
+  );
+  const headerValue = headerEntry?.[1];
   if (!headerValue) {
     return false;
   }
   const received = Array.isArray(headerValue) ? headerValue[0] : headerValue;
-  return received === secretToken;
+  if (typeof received !== 'string') {
+    return false;
+  }
+  const actual = Buffer.from(received);
+  const expected = Buffer.from(secretToken);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 /**
@@ -47,16 +57,35 @@ export function createWebhookHandler(options: {
   onError?: (error: unknown) => void | Promise<void>;
 }) {
   return async (request: WebhookRequest): Promise<{ status: number; body?: unknown }> => {
+    if (!verifyWebhookSecret(request.headers, options.secretToken)) {
+      return { status: 401, body: { ok: false, description: 'invalid webhook secret' } };
+    }
+
+    let update: Update;
     try {
-      if (!verifyWebhookSecret(request.headers, options.secretToken)) {
-        return { status: 401, body: { ok: false, description: 'invalid webhook secret' } };
-      }
-      const update = parseWebhookUpdate(request.body);
+      update = parseWebhookUpdate(request.body);
+    } catch (error) {
+      await notifyWebhookError(options.onError, error);
+      return { status: 400, body: { ok: false, description: 'invalid webhook payload' } };
+    }
+
+    try {
       await options.onUpdate(update);
       return { status: 200, body: { ok: true } };
     } catch (error) {
-      await options.onError?.(error);
-      return { status: 400, body: { ok: false, description: 'invalid webhook payload' } };
+      await notifyWebhookError(options.onError, error);
+      return { status: 500, body: { ok: false, description: 'webhook handler failed' } };
     }
   };
+}
+
+async function notifyWebhookError(
+  handler: ((error: unknown) => void | Promise<void>) | undefined,
+  error: unknown,
+): Promise<void> {
+  try {
+    await handler?.(error);
+  } catch {
+    return;
+  }
 }

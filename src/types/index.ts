@@ -39,6 +39,7 @@ export interface ClientOptions {
 export interface RequestOptions {
   requestId?: string;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 export interface User {
@@ -53,7 +54,7 @@ export interface User {
   is_premium?: boolean;
   is_official?: boolean;
   is_online?: boolean;
-  last_seen?: string;
+  last_seen?: number;
   bot_owner_id?: string;
   can_join_groups?: boolean;
   supports_inline_queries?: boolean;
@@ -62,12 +63,15 @@ export interface User {
 
 export interface Chat {
   id: string;
-  type: 'private' | 'group' | 'channel' | string;
+  type?: 'private' | 'group' | 'channel' | string;
   title?: string;
   username?: string;
   description?: string;
+  photo?: string;
   avatar_url?: string;
   member_count?: number;
+  is_public?: boolean;
+  is_verified?: boolean;
 }
 
 export interface MediaVariant {
@@ -254,104 +258,100 @@ export interface SetWebhookResult {
   enabled: boolean;
 }
 
-export interface SendMessageOptions {
+export interface SendMessageOptions extends RequestOptions {
   chat_id: string;
-  text?: string;
-  caption?: string;
+  text: string;
   parse_mode?: string;
   disable_notification?: boolean;
   reply_to_message_id?: string;
   reply_markup?: ReplyMarkup;
-  requestId?: string;
 }
 
-export interface SendMediaOptions {
+export interface SendMediaOptions extends RequestOptions {
   chat_id: string;
   caption?: string;
   disable_notification?: boolean;
   reply_to_message_id?: string;
   reply_markup?: ReplyMarkup;
-  requestId?: string;
 }
 
-export interface EditMessageTextOptions {
+export interface EditMessageTextOptions extends RequestOptions {
   chat_id?: string;
   message_id?: string;
   inline_message_id?: string;
   text: string;
   parse_mode?: string;
   reply_markup?: ReplyMarkup;
-  requestId?: string;
 }
 
-export interface DeleteMessageOptions {
+export interface DeleteMessageOptions extends RequestOptions {
   chat_id: string;
   message_id: string;
-  requestId?: string;
 }
 
-export interface SendChatActionOptions {
+export interface SendChatActionOptions extends RequestOptions {
   chat_id: string;
   action: ChatAction;
-  requestId?: string;
 }
 
-export interface GetUpdatesOptions {
+export interface GetUpdatesOptions extends RequestOptions {
   offset?: number;
   limit?: number;
   timeout?: number;
   allowed_updates?: UpdateType[];
-  requestId?: string;
-  signal?: AbortSignal;
 }
 
-export interface SetWebhookOptions {
+export interface SetWebhookOptions extends RequestOptions {
   url: string;
   secret_token?: string;
   max_connections?: number;
   allowed_updates?: UpdateType[];
   drop_pending_updates?: boolean;
-  requestId?: string;
 }
 
-export interface DeleteWebhookOptions {
+export interface DeleteWebhookOptions extends RequestOptions {
   drop_pending_updates?: boolean;
-  requestId?: string;
 }
 
-export interface SetMyCommandsOptions {
+export interface SetMyCommandsOptions extends RequestOptions {
   commands: BotCommand[];
   scope?: CommandScope;
   language_code?: string;
-  requestId?: string;
 }
 
-export interface GetMyCommandsOptions {
+export interface GetMyCommandsOptions extends RequestOptions {
   scope?: CommandScope;
   language_code?: string;
-  requestId?: string;
 }
 
-export interface DeleteMyCommandsOptions {
+export interface DeleteMyCommandsOptions extends RequestOptions {
   scope?: CommandScope;
   language_code?: string;
-  requestId?: string;
 }
 
-export interface AnswerCallbackQueryOptions {
+export interface AnswerCallbackQueryOptions extends RequestOptions {
   callback_query_id: string;
   text?: string;
   show_alert?: boolean;
   url?: string;
-  requestId?: string;
 }
 
-export interface GetChatOptions {
+export interface GetChatOptions extends RequestOptions {
   chat_id: string;
-  requestId?: string;
 }
 
-export type MediaInput = string | { file_id?: string; url?: string };
+export interface MediaReference {
+  file_id?: string;
+  url?: string;
+  file_name?: string;
+  mime_type?: string;
+  thumbnail_url?: string;
+  duration?: number;
+  width?: number;
+  height?: number;
+}
+
+export type MediaInput = string | MediaReference;
 
 export interface PollingOptions {
   interval?: number;
@@ -366,6 +366,7 @@ export interface WebhookServerOptions {
   host?: string;
   port?: number;
   secretToken?: string;
+  maxBodyBytes?: number;
 }
 
 export interface BotOptions extends ClientOptions {
@@ -374,9 +375,21 @@ export interface BotOptions extends ClientOptions {
   allowed_updates?: UpdateType[];
 }
 
+export interface BotSetupOptions {
+  commands?: BotCommand[];
+  commandScope?: CommandScope;
+  languageCode?: string;
+  webhook?: SetWebhookOptions | false;
+}
+
 export type MessageHandler = (message: Message, update: Update) => void | Promise<void>;
 export type EditedMessageHandler = (message: Message, update: Update) => void | Promise<void>;
 export type CallbackQueryHandler = (query: CallbackQuery, update: Update) => void | Promise<void>;
+export type TextHandler = (
+  message: Message,
+  match: RegExpExecArray | null,
+  update: Update,
+) => void | Promise<void>;
 export type UpdateHandler = (update: Update) => void | Promise<void>;
 export type ErrorHandler = (error: unknown) => void | Promise<void>;
 export type PollingErrorHandler = (error: unknown) => void | Promise<void>;
