@@ -138,23 +138,44 @@ export class RiseonlyBot extends ApiClient {
 
   async setup(options: BotSetupOptions): Promise<void> {
     if (options.name !== undefined) {
-      await this.setMyName({ name: options.name });
+      const current = await this.getMyName();
+      if (current.name !== options.name) {
+        await this.setMyName({ name: options.name });
+      }
     }
     if (options.description !== undefined) {
-      await this.setMyDescription({ description: options.description });
+      const current = await this.getMyDescription();
+      if (current.description !== options.description) {
+        await this.setMyDescription({ description: options.description });
+      }
     }
     if (options.profilePhoto !== undefined) {
-      await this.setMyProfilePhoto({ photo: options.profilePhoto });
+      const current = await this.getMe();
+      const desiredUrl = typeof options.profilePhoto === 'string'
+        ? options.profilePhoto
+        : options.profilePhoto.url;
+      if (current.avatar_url !== desiredUrl) {
+        await this.setMyProfilePhoto({ photo: options.profilePhoto });
+      }
     }
     if (options.commands) {
-      await this.setMyCommands({
-        commands: options.commands,
+      const current = await this.getMyCommands({
         scope: options.commandScope,
         language_code: options.languageCode,
       });
+      if (!commandsEqual(current, options.commands)) {
+        await this.setMyCommands({
+          commands: options.commands,
+          scope: options.commandScope,
+          language_code: options.languageCode,
+        });
+      }
     }
     if (options.webhook === false) {
-      await this.deleteWebhook();
+      const current = await this.getWebhookInfo();
+      if (current.url || current.enabled) {
+        await this.deleteWebhook();
+      }
     } else if (options.webhook) {
       await this.setWebhook(options.webhook);
     }
@@ -365,6 +386,16 @@ export class RiseonlyBot extends ApiClient {
       }
     }
   }
+}
+
+function commandsEqual(
+  left: Array<{ command: string; description: string }>,
+  right: Array<{ command: string; description: string }>,
+): boolean {
+  return left.length === right.length && left.every((command, index) =>
+    command.command === right[index]?.command
+    && command.description === right[index]?.description
+  );
 }
 
 function normalizePollingOptions(
