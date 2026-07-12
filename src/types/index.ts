@@ -258,6 +258,28 @@ export interface SetWebhookResult {
   enabled: boolean;
 }
 
+export interface BotName {
+  name: string;
+}
+
+export interface BotDescription {
+  description: string;
+}
+
+export interface SetMyNameOptions extends RequestOptions {
+  name: string;
+}
+
+export interface SetMyDescriptionOptions extends RequestOptions {
+  description: string;
+}
+
+export type ProfilePhotoInput = string | { url: string };
+
+export interface SetMyProfilePhotoOptions extends RequestOptions {
+  photo: ProfilePhotoInput;
+}
+
 export interface SendMessageOptions extends RequestOptions {
   chat_id: string;
   text: string;
@@ -376,6 +398,9 @@ export interface BotOptions extends ClientOptions {
 }
 
 export interface BotSetupOptions {
+  name?: string;
+  description?: string;
+  profilePhoto?: ProfilePhotoInput;
   commands?: BotCommand[];
   commandScope?: CommandScope;
   languageCode?: string;

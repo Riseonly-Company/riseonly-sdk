@@ -137,6 +137,15 @@ export class RiseonlyBot extends ApiClient {
   }
 
   async setup(options: BotSetupOptions): Promise<void> {
+    if (options.name !== undefined) {
+      await this.setMyName({ name: options.name });
+    }
+    if (options.description !== undefined) {
+      await this.setMyDescription({ description: options.description });
+    }
+    if (options.profilePhoto !== undefined) {
+      await this.setMyProfilePhoto({ photo: options.profilePhoto });
+    }
     if (options.commands) {
       await this.setMyCommands({
         commands: options.commands,

@@ -25,6 +25,12 @@ export const SUPPORTED_METHODS = [
   'setMyCommands',
   'getMyCommands',
   'deleteMyCommands',
+  'setMyName',
+  'getMyName',
+  'setMyDescription',
+  'getMyDescription',
+  'setMyProfilePhoto',
+  'removeMyProfilePhoto',
   'answerCallbackQuery',
   'getChat',
 ] as const;
