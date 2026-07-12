@@ -1,10 +1,22 @@
 name: publish-prod
 
 on:
+  push:
+    branches: [staging]
   pull_request:
     types: [closed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      channel:
+        description: latest or next
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - latest
+          - next
 
 permissions:
   contents: write
@@ -15,22 +27,43 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (
+        github.event_name == 'pull_request' &&
         github.event.pull_request.merged == true &&
         contains(github.event.pull_request.labels.*.name, 'deploy')
+      ) ||
+      (
+        github.event_name == 'push' &&
+        !contains(github.event.head_commit.message, '[skip ci]')
       )
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event_name == 'push' && 'staging' || 'main' }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - run: npm install -g npm@latest
+      - name: resolve channel
+        id: channel
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            CHANNEL=next
+            BRANCH=staging
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.channel }}" != "auto" ]; then
+            CHANNEL="${{ inputs.channel }}"
+            BRANCH=$([ "$CHANNEL" = "next" ] && echo staging || echo main)
+          else
+            CHANNEL=latest
+            BRANCH=main
+          fi
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "tag=$([ "$CHANNEL" = "next" ] && echo next || echo latest)" >> "$GITHUB_OUTPUT"
       - name: bump version
         id: version
-        run: node .github/scripts/bump-version.mjs latest
+        run: node .github/scripts/bump-version.mjs "${{ steps.channel.outputs.channel }}"
       - run: npm ci
       - run: npm test
       - run: npm run build
@@ -44,17 +77,23 @@ jobs:
           fi
       - name: bootstrap first publish with token
         if: steps.check.outputs.exists == 'false'
-        run: npm publish --access public --tag latest
+        run: npm publish --access public --tag ${{ steps.channel.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: publish with trusted publishing
         if: steps.check.outputs.exists == 'true'
-        run: npm publish --access public --tag latest --provenance
+        run: npm publish --access public --tag ${{ steps.channel.outputs.tag }} --provenance
       - name: commit release
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json
-          git commit -m "release v${{ steps.version.outputs.version }}"
-          git tag "v${{ steps.version.outputs.version }}"
-          git push origin main --tags
+          if [ "${{ steps.channel.outputs.channel }}" = "next" ]; then
+            git commit -m "release v${{ steps.version.outputs.version }} [skip ci]"
+          else
+            git commit -m "release v${{ steps.version.outputs.version }}"
+            git tag "v${{ steps.version.outputs.version }}"
+            git push origin "${{ steps.channel.outputs.branch }}" --tags
+            exit 0
+          fi
+          git push origin "${{ steps.channel.outputs.branch }}"

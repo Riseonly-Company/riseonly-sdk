@@ -151,10 +151,10 @@ const bot = new RiseonlyBot(token, {
 
 ## Release channels
 
-CI bumps versions automatically:
+CI bumps versions automatically via `publish-prod.yml`:
 
-- merge to `main` with `deploy` label → patch bump → publish `latest`
-- push to `staging` → prerelease bump (`x.y.z-next.N`) → publish `next`
+- push to `staging` → prerelease bump → publish `next` (OIDC)
+- merge to `main` with `deploy` label → patch bump → publish `latest` (OIDC)
 
 Manual dispatch is also available from GitHub Actions.
 
