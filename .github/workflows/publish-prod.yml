@@ -25,10 +25,25 @@ jobs:
           ref: main
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - name: publish latest tag
+      - name: check if package exists
+        id: check
+        run: |
+          if npm view @riseonly/sdk version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: bootstrap first publish with token
+        if: steps.check.outputs.exists == 'false'
         run: npm publish --access public --tag latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: publish with trusted publishing
+        if: steps.check.outputs.exists == 'true'
+        run: npm publish --access public --tag latest --provenance
