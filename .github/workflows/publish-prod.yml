@@ -31,19 +31,29 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - name: check if package exists
+      - name: check publish state
         id: check
         run: |
-          if npm view @riseonly/sdk version >/dev/null 2>&1; then
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if npm view "@riseonly/sdk@$VERSION" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+          if npm view @riseonly/sdk name >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: skip already published version
+        if: steps.check.outputs.published == 'true'
+        run: echo "@riseonly/sdk@${{ steps.check.outputs.version }} is already on npm"
       - name: bootstrap first publish with token
-        if: steps.check.outputs.exists == 'false'
+        if: steps.check.outputs.published == 'false' && steps.check.outputs.exists == 'false'
         run: npm publish --access public --tag latest
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: publish with trusted publishing
-        if: steps.check.outputs.exists == 'true'
+        if: steps.check.outputs.published == 'false' && steps.check.outputs.exists == 'true'
         run: npm publish --access public --tag latest --provenance

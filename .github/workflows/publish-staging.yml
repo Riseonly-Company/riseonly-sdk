@@ -21,7 +21,23 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - name: check publish state
+        id: check
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if npm view "@riseonly/sdk@$VERSION" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: skip already published version
+        if: steps.check.outputs.published == 'true'
+        run: |
+          echo "@riseonly/sdk@${{ steps.check.outputs.version }} is already on npm"
+          npm dist-tag add "@riseonly/sdk@${{ steps.check.outputs.version }}" next || true
       - name: publish next tag
+        if: steps.check.outputs.published == 'false'
         run: npm publish --access public --tag next
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
