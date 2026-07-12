@@ -151,10 +151,15 @@ const bot = new RiseonlyBot(token, {
 
 ## Release channels
 
-- `latest` — production releases from `main` after merge with `deploy` label
-- `next` — staging prereleases from `staging` branch
+CI bumps versions automatically:
+
+- merge to `main` with `deploy` label → patch bump → publish `latest`
+- push to `staging` → prerelease bump (`x.y.z-next.N`) → publish `next`
+
+Manual dispatch is also available from GitHub Actions.
 
 ```bash
+npm install @riseonly/sdk
 npm install @riseonly/sdk@next
 ```
 
