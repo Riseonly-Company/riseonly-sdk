@@ -91,8 +91,23 @@ describe('developer helpers', () => {
     expect(errorListener).toHaveBeenCalledOnce();
   });
 
-  it('configures commands and polling mode through setup', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, result: true }));
+  it('keeps declarative setup idempotent when configuration already matches', async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const method = String(url).split('/').at(-1);
+      const result = {
+        getMyName: { name: 'Music Bot' },
+        getMyDescription: { description: 'Search mock tracks' },
+        getMe: {
+          id: 'bot-1',
+          is_bot: true,
+          first_name: 'Music Bot',
+          avatar_url: 'https://example.com/avatar.png',
+        },
+        getMyCommands: [{ command: 'start', description: 'Start the bot' }],
+        getWebhookInfo: { url: '', enabled: false },
+      }[method ?? ''];
+      return jsonResponse({ ok: true, result });
+    });
     const bot = new RiseonlyBot(token, { fetch: fetchMock as typeof fetch });
     await bot.setup({
       name: 'Music Bot',
@@ -104,11 +119,11 @@ describe('developer helpers', () => {
     expect(fetchMock).toHaveBeenCalledTimes(5);
     const methods = fetchMock.mock.calls.map(([url]) => String(url).split('/').at(-1));
     expect(methods).toEqual([
-      'setMyName',
-      'setMyDescription',
-      'setMyProfilePhoto',
-      'setMyCommands',
-      'deleteWebhook',
+      'getMyName',
+      'getMyDescription',
+      'getMe',
+      'getMyCommands',
+      'getWebhookInfo',
     ]);
   });
 
