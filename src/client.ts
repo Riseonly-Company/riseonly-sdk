@@ -14,6 +14,8 @@ import type {
   AnswerCallbackQueryOptions,
   ApiEnvelope,
   BotCommand,
+  BotDescription,
+  BotName,
   Capabilities,
   Chat,
   ClientOptions,
@@ -31,6 +33,9 @@ import type {
   SendMediaOptions,
   SendMessageOptions,
   SetMyCommandsOptions,
+  SetMyDescriptionOptions,
+  SetMyNameOptions,
+  SetMyProfilePhotoOptions,
   SetWebhookOptions,
   SetWebhookResult,
   Update,
@@ -224,6 +229,33 @@ export class ApiClient {
   async deleteMyCommands(options: DeleteMyCommandsOptions = {}): Promise<boolean> {
     const { request, payload } = splitRequestOptions(options);
     return this.callMethod<boolean>('deleteMyCommands', payload, request);
+  }
+
+  async setMyName(options: SetMyNameOptions): Promise<boolean> {
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<boolean>('setMyName', payload, request);
+  }
+
+  async getMyName(options: RequestOptions = {}): Promise<BotName> {
+    return this.callMethod<BotName>('getMyName', {}, options);
+  }
+
+  async setMyDescription(options: SetMyDescriptionOptions): Promise<boolean> {
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<boolean>('setMyDescription', payload, request);
+  }
+
+  async getMyDescription(options: RequestOptions = {}): Promise<BotDescription> {
+    return this.callMethod<BotDescription>('getMyDescription', {}, options);
+  }
+
+  async setMyProfilePhoto(options: SetMyProfilePhotoOptions): Promise<boolean> {
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<boolean>('setMyProfilePhoto', payload, request);
+  }
+
+  async removeMyProfilePhoto(options: RequestOptions = {}): Promise<boolean> {
+    return this.callMethod<boolean>('removeMyProfilePhoto', {}, options);
   }
 
   async answerCallbackQuery(options: AnswerCallbackQueryOptions): Promise<boolean> {

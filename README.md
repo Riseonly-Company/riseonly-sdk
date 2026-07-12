@@ -73,6 +73,9 @@ Keep bot commands and delivery configuration in source control instead of repeat
 
 ```js
 await bot.setup({
+  name: 'Music Bot',
+  description: 'Find and preview music',
+  profilePhoto: { url: 'https://cdn.example.com/music-bot.jpg' },
   commands: [
     { command: 'start', description: 'Start the bot' },
     { command: 'help', description: 'Show help' },
@@ -84,6 +87,8 @@ await bot.launch();
 ```
 
 Use `webhook: { url, secret_token }` to configure webhook delivery instead. `bot.stop()` gracefully stops polling and the built-in webhook server.
+
+Profile settings written by `setup()` use the same backend source of truth as the Riseonly owner settings screen, so changes are immediately visible in the app. Individual `setMyName`, `getMyName`, `setMyDescription`, `getMyDescription`, `setMyProfilePhoto`, and `removeMyProfilePhoto` methods are also available.
 
 ## Media metadata
 

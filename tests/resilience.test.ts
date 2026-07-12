@@ -95,12 +95,21 @@ describe('developer helpers', () => {
     const fetchMock = vi.fn(async () => jsonResponse({ ok: true, result: true }));
     const bot = new RiseonlyBot(token, { fetch: fetchMock as typeof fetch });
     await bot.setup({
+      name: 'Music Bot',
+      description: 'Search mock tracks',
+      profilePhoto: { url: 'https://example.com/avatar.png' },
       commands: [{ command: 'start', description: 'Start the bot' }],
       webhook: false,
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
     const methods = fetchMock.mock.calls.map(([url]) => String(url).split('/').at(-1));
-    expect(methods).toEqual(['setMyCommands', 'deleteWebhook']);
+    expect(methods).toEqual([
+      'setMyName',
+      'setMyDescription',
+      'setMyProfilePhoto',
+      'setMyCommands',
+      'deleteWebhook',
+    ]);
   });
 
   it('preserves media metadata in Bot API requests', async () => {
