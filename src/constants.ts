@@ -15,6 +15,7 @@ export const SUPPORTED_METHODS = [
   'sendAudio',
   'sendVoice',
   'sendAnimation',
+  'uploadMedia',
   'editMessageText',
   'deleteMessage',
   'sendChatAction',

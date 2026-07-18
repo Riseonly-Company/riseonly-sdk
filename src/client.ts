@@ -39,6 +39,8 @@ import type {
   SetWebhookOptions,
   SetWebhookResult,
   Update,
+  UploadedMedia,
+  UploadMediaOptions,
   User,
   WebhookInfo,
 } from './types/index.js';
@@ -178,6 +180,11 @@ export class ApiClient {
 
   async sendAnimation(animation: MediaInput, options: SendMediaOptions): Promise<Message> {
     return this.sendMedia('sendAnimation', 'animation', animation, options);
+  }
+
+  async uploadMedia(options: UploadMediaOptions): Promise<UploadedMedia> {
+    const { request, payload } = splitRequestOptions(options);
+    return this.callMethod<UploadedMedia>('uploadMedia', payload, request);
   }
 
   async editMessageText(options: EditMessageTextOptions): Promise<Message> {
