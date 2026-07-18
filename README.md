@@ -92,7 +92,39 @@ Profile settings written by `setup()` use the same backend source of truth as th
 
 ## Media metadata
 
-Remote HTTPS media can include metadata used by Riseonly clients:
+For fast repeat sends, upload a public HTTPS object once and keep the returned
+Riseonly `file_id`. This is a public Bot API capability available to every bot:
+
+```js
+const stored = await bot.uploadMedia({
+  media_type: 'audio',
+  url: 'https://cdn.example.com/song.mp3',
+  requestId: 'ingest-track-42',
+});
+
+await bot.sendAudio({ file_id: stored.file_id }, {
+  chat_id: 'chat-id',
+  caption: 'Artist — Song',
+});
+```
+
+Riseonly validates the remote bytes, stores them under a content-addressed key,
+and scopes reuse of the opaque `file_id` to the bot that uploaded it. Uploaded
+bot media is intended for reusable public delivery; do not use this method for
+secrets or private user files.
+
+Bots can also update the loader label while a worker prepares a result. The
+label is optional, trimmed by the API, and limited to 16 Unicode characters:
+
+```js
+await bot.sendChatAction({
+  chat_id: 'chat-id',
+  action: 'upload_document',
+  status_text: 'собирает MP3…',
+});
+```
+
+Remote HTTPS media can also be sent directly with metadata:
 
 ```js
 await bot.sendAudio({

@@ -149,6 +149,49 @@ describe('developer helpers', () => {
     });
   });
 
+  it('passes an optional custom chat action status', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, result: true }));
+    const bot = new RiseonlyBot(token, { fetch: fetchMock as typeof fetch });
+    await bot.sendChatAction({
+      chat_id: 'c1',
+      action: 'upload_document',
+      status_text: 'собирает MP3…',
+    });
+    const init = fetchMock.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      chat_id: 'c1',
+      action: 'upload_document',
+      status_text: 'собирает MP3…',
+    });
+  });
+
+  it('uploads reusable media through the public Bot API', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      ok: true,
+      result: {
+        file_id: 'botmedia_018f82d5-cd83-7db4-9a8e-c5887461f347',
+        file_url: 'https://cdn.riseonly.net/public/inline/aa/file.mp3',
+        media_type: 'audio',
+        mime_type: 'audio/mpeg',
+        file_size: 123,
+      },
+    }));
+    const bot = new RiseonlyBot(token, { fetch: fetchMock as typeof fetch });
+    const stored = await bot.uploadMedia({
+      media_type: 'audio',
+      url: 'https://example.com/song.mp3',
+      requestId: 'upload-song-1',
+    });
+    expect(stored.media_type).toBe('audio');
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/uploadMedia$/);
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      media_type: 'audio',
+      url: 'https://example.com/song.mp3',
+    });
+    expect(new Headers((init as RequestInit).headers).get('x-request-id')).toBe('upload-song-1');
+  });
+
   it('runs a bounded built-in webhook server', async () => {
     const port = await reservePort();
     const bot = new RiseonlyBot(token);

@@ -297,6 +297,33 @@ export interface SendMediaOptions extends RequestOptions {
   reply_markup?: ReplyMarkup;
 }
 
+export type UploadMediaType =
+  | 'image'
+  | 'photo'
+  | 'video'
+  | 'audio'
+  | 'voice'
+  | 'document'
+  | 'animation'
+  | 'gif'
+  | 'sticker';
+
+export interface UploadMediaOptions extends RequestOptions {
+  /** Public HTTPS source fetched once and stored by Riseonly. */
+  url: string;
+  media_type: UploadMediaType;
+}
+
+export interface UploadedMedia {
+  file_id: string;
+  file_url: string;
+  media_type: string;
+  mime_type: string;
+  file_size: number;
+  width?: number;
+  height?: number;
+}
+
 export interface EditMessageTextOptions extends RequestOptions {
   chat_id?: string;
   message_id?: string;
@@ -314,6 +341,8 @@ export interface DeleteMessageOptions extends RequestOptions {
 export interface SendChatActionOptions extends RequestOptions {
   chat_id: string;
   action: ChatAction;
+  /** Optional activity label rendered next to the loader. Maximum 16 characters. */
+  status_text?: string;
 }
 
 export interface GetUpdatesOptions extends RequestOptions {
