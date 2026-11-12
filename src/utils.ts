@@ -1,4 +1,16 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { Message } from './types/index.js';
+
+/**
+ * Reads an opaque parameter from `/start <payload>` (including addressed commands).
+ * Returns undefined for a plain start or malformed payload. This is user input,
+ * not proof of a link visit or authorization; resolve it against your own records.
+ */
+export function getStartPayload(message: Pick<Message, 'text'>): string | undefined {
+  return /^\/start(?:@[A-Za-z0-9_]+)?[ \t]+([A-Za-z0-9_-]{1,64})$/.exec(
+    message.text?.trim() ?? '',
+  )?.[1];
+}
 
 import type {
   Chat,

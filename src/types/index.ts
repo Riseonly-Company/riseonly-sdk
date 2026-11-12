@@ -471,6 +471,8 @@ export type MediaInput = string | MediaReference;
 
 export interface PollingOptions {
   interval?: number;
+  retryInitialInterval?: number;
+  retryMaxInterval?: number;
   timeout?: number;
   limit?: number;
   allowed_updates?: UpdateType[];

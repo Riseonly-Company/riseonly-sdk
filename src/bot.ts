@@ -232,8 +232,13 @@ export class RiseonlyBot extends ApiClient {
     if (this.polling) {
       return;
     }
+    const pollingOptions = normalizePollingOptions({
+      ...this.pollingOptions,
+      ...options,
+      autoStart: true,
+    });
     this.polling = true;
-    this.pollingOptions = { ...this.pollingOptions, ...options, autoStart: true };
+    this.pollingOptions = pollingOptions;
     this.pollingAbort = new AbortController();
     this.pollingTask = this.pollLoop();
   }
@@ -369,6 +374,7 @@ export class RiseonlyBot extends ApiClient {
   }
 
   private async pollLoop(): Promise<void> {
+    let consecutiveFailures = 0;
     while (this.polling) {
       try {
         const updates = await this.getUpdates({
@@ -387,8 +393,9 @@ export class RiseonlyBot extends ApiClient {
           this.offset = Math.max(this.offset, update.update_id + 1);
           processed += 1;
         }
+        consecutiveFailures = 0;
         if (processed === 0) {
-          await sleep(this.pollingOptions.interval ?? 1000);
+          await sleep(this.pollingOptions.interval ?? 1000, this.pollingAbort?.signal);
         }
       } catch (error) {
         if (!this.polling || isAbortError(error)) {
@@ -399,11 +406,13 @@ export class RiseonlyBot extends ApiClient {
         } catch {
           // The original update stays unacknowledged and is retried by offset.
         }
-        if (error instanceof RiseonlyError && error.retryAfter) {
-          await sleep(error.retryAfter * 1000);
-        } else {
-          await sleep(this.pollingOptions.interval ?? 1000);
-        }
+        const retryDelay = pollingRetryDelay(
+          error,
+          consecutiveFailures,
+          this.pollingOptions,
+        );
+        consecutiveFailures += 1;
+        await sleep(retryDelay, this.pollingAbort?.signal);
       }
     }
   }
@@ -468,22 +477,77 @@ function normalizePollingOptions(
   value: BotOptions['polling'],
 ): PollingOptions & { autoStart: boolean } {
   if (!value) {
-    return { interval: 1000, timeout: 30, limit: 100, autoStart: false };
+    return {
+      interval: 1000,
+      retryInitialInterval: 1000,
+      retryMaxInterval: 30_000,
+      timeout: 30,
+      limit: 100,
+      autoStart: false,
+    };
   }
   if (value === true) {
-    return { interval: 1000, timeout: 30, limit: 100, autoStart: true };
+    return {
+      interval: 1000,
+      retryInitialInterval: 1000,
+      retryMaxInterval: 30_000,
+      timeout: 30,
+      limit: 100,
+      autoStart: true,
+    };
   }
-  return {
+  const normalized = {
     interval: 1000,
+    retryInitialInterval: 1000,
+    retryMaxInterval: 30_000,
     timeout: 30,
     limit: 100,
     autoStart: true,
     ...value,
   };
+  validatePollingRetryOptions(normalized);
+  return normalized;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function validatePollingRetryOptions(options: PollingOptions): void {
+  const initial = options.retryInitialInterval ?? 1000;
+  const maximum = options.retryMaxInterval ?? 30_000;
+  if (!Number.isFinite(initial) || initial <= 0) {
+    throw new Error('retryInitialInterval must be a positive number');
+  }
+  if (!Number.isFinite(maximum) || maximum < initial) {
+    throw new Error('retryMaxInterval must be greater than or equal to retryInitialInterval');
+  }
+}
+
+function pollingRetryDelay(
+  error: unknown,
+  consecutiveFailures: number,
+  options: PollingOptions,
+): number {
+  if (error instanceof RiseonlyError && error.retryAfter !== undefined) {
+    return Math.max(0, error.retryAfter * 1000);
+  }
+  const initial = options.retryInitialInterval ?? 1000;
+  const maximum = options.retryMaxInterval ?? 30_000;
+  const exponent = Math.min(consecutiveFailures, 30);
+  const ceiling = Math.min(maximum, initial * (2 ** exponent));
+  return Math.floor(Math.random() * (ceiling + 1));
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal?.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timeout = setTimeout(finish, ms);
+    signal?.addEventListener('abort', finish, { once: true });
+  });
 }
 
 function isAbortError(error: unknown): boolean {

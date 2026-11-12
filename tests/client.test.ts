@@ -41,6 +41,16 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe('ApiClient', () => {
+  it('gets a start link using the authenticated bot and preserves the payload', async () => {
+    const link = 'https://staging.riseonly.net/c/anonbot?start=Ab_9-z';
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, result: link }));
+    const client = new ApiClient(token, { fetch: fetchMock as typeof fetch });
+    expect(await client.getStartLink('Ab_9-z')).toBe(link);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(`${DEFAULT_API_BASE}${CANONICAL_API_PREFIX}/getStartLink`);
+    expect(JSON.parse(String(fetchInit(fetchMock.mock.calls[0]!).body))).toEqual({ start_param: 'Ab_9-z' });
+    await client.getStartLink();
+    expect(JSON.parse(String(fetchInit(fetchMock.mock.calls[1]!).body))).toEqual({});
+  });
   it('calls canonical bot api endpoints', async () => {
     const fetchMock = vi.fn(async (url: string | URL | Request) => {
       expect(String(url)).toBe(`${DEFAULT_API_BASE}${CANONICAL_API_PREFIX}/getMe`);

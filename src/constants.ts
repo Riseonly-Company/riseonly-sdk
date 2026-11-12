@@ -8,6 +8,7 @@ export const IDEMPOTENCY_HEADER = 'x-request-id';
 
 export const SUPPORTED_METHODS = [
   'getMe',
+  'getStartLink',
   'sendMessage',
   'sendPhoto',
   'sendVideo',

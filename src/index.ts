@@ -28,6 +28,7 @@ export {
   createRequestId,
   deriveInitDataSecret,
   extractInitDataFromLaunchUrl,
+  getStartPayload,
   isGroupChat,
   parseCommand,
   parseInitData,
