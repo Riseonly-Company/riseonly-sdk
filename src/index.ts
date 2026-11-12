@@ -10,6 +10,7 @@ export {
 export {
   CANONICAL_API_PREFIX,
   CHAT_ACTIONS,
+  CHAT_MEMBER_STATUSES,
   COMMAND_SCOPES,
   DEFAULT_API_BASE,
   IDEMPOTENCY_HEADER,
@@ -27,8 +28,18 @@ export {
   createRequestId,
   deriveInitDataSecret,
   extractInitDataFromLaunchUrl,
+  isGroupChat,
+  parseCommand,
   parseInitData,
+  serializeCommandScope,
   signInitData,
   verifyInitData,
 } from './utils.js';
 export type * from './types/index.js';
+export type {
+  BotApiMethod,
+  ChatAction,
+  ChatMemberStatus,
+  CommandScope,
+  UpdateType,
+} from './constants.js';

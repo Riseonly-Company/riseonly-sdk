@@ -1,4 +1,10 @@
-import type { BotApiMethod, ChatAction, CommandScope, UpdateType } from '../constants.js';
+import type {
+  BotApiMethod,
+  ChatAction,
+  ChatMemberStatus,
+  CommandScope,
+  UpdateType,
+} from '../constants.js';
 
 export interface ApiResponse<T> {
   ok: true;
@@ -48,6 +54,9 @@ export interface User {
   first_name: string;
   name?: string;
   username?: string;
+  tag?: string;
+  user_chat_id?: string;
+  bot_is_active?: boolean;
   description?: string;
   avatar_url?: string;
   banner_url?: string;
@@ -69,6 +78,8 @@ export interface Chat {
   description?: string;
   photo?: string;
   avatar_url?: string;
+  logo_url?: string;
+  banner_url?: string;
   member_count?: number;
   is_public?: boolean;
   is_verified?: boolean;
@@ -190,6 +201,7 @@ export interface Message {
   timestamp?: number;
   chat: Chat;
   from?: User;
+  sender_id?: string;
   text?: string;
   content?: string;
   original_content?: string;
@@ -204,7 +216,11 @@ export interface Message {
   reply_to_message?: Message;
   forward_origin?: ForwardOrigin;
   via_bot?: User;
+  /** Topic of a group with topics; pass it back to answer in the same topic. */
   message_thread_id?: string;
+  /** Group messages: true when the message mentions this bot. */
+  is_mentioned_you?: boolean;
+  is_system_message?: boolean;
   temp_id?: string;
   media_items?: MediaFile[];
   photo?: MediaFile[];
@@ -228,18 +244,63 @@ export interface CallbackQuery {
   game_short_name?: string;
 }
 
+export interface ChatMember {
+  user: User;
+  status: ChatMemberStatus | string;
+}
+
+/** A member status change in a group or channel. */
+export interface ChatMemberUpdated {
+  chat: Chat;
+  /** Who made the change, for example the person who added the bot to a group. */
+  from: User;
+  date: number;
+  old_chat_member: ChatMember;
+  new_chat_member: ChatMember;
+}
+
 export interface Update {
   update_id: number;
   message?: Message;
   edited_message?: Message;
   callback_query?: CallbackQuery;
-  chat_member?: unknown;
-  my_chat_member?: unknown;
+  chat_member?: ChatMemberUpdated;
+  /** The bot itself was added to or removed from a group or channel. */
+  my_chat_member?: ChatMemberUpdated;
 }
 
 export interface BotCommand {
   command: string;
   description: string;
+}
+
+/** A slash command parsed from message text: `/command@bot args`. */
+export interface ParsedCommand {
+  /** Command name without the slash, lowercased. */
+  command: string;
+  /** Bot tag after `@`, as typed; undefined for an unaddressed command. */
+  target?: string;
+  /** Text after the command token, trimmed. */
+  args: string;
+}
+
+/**
+ * Object form of a command scope. `{ type: 'chat', chat_id }` targets one chat and
+ * is sent as `chat:<chat_id>`.
+ */
+export type BotCommandScope =
+  | { type: 'default' }
+  | { type: 'all_private_chats' }
+  | { type: 'all_group_chats' }
+  | { type: 'chat'; chat_id: string };
+
+export type CommandScopeInput = CommandScope | BotCommandScope;
+
+/** One command list for `setup()`: a scope and language pair. */
+export interface BotCommandSet {
+  commands: BotCommand[];
+  scope?: CommandScopeInput;
+  languageCode?: string;
 }
 
 export interface WebhookInfo {
@@ -286,6 +347,8 @@ export interface SendMessageOptions extends RequestOptions {
   parse_mode?: string;
   disable_notification?: boolean;
   reply_to_message_id?: string;
+  /** Topic of a group with topics. */
+  message_thread_id?: string;
   reply_markup?: ReplyMarkup;
 }
 
@@ -294,6 +357,8 @@ export interface SendMediaOptions extends RequestOptions {
   caption?: string;
   disable_notification?: boolean;
   reply_to_message_id?: string;
+  /** Topic of a group with topics. */
+  message_thread_id?: string;
   reply_markup?: ReplyMarkup;
 }
 
@@ -366,17 +431,17 @@ export interface DeleteWebhookOptions extends RequestOptions {
 
 export interface SetMyCommandsOptions extends RequestOptions {
   commands: BotCommand[];
-  scope?: CommandScope;
+  scope?: CommandScopeInput;
   language_code?: string;
 }
 
 export interface GetMyCommandsOptions extends RequestOptions {
-  scope?: CommandScope;
+  scope?: CommandScopeInput;
   language_code?: string;
 }
 
 export interface DeleteMyCommandsOptions extends RequestOptions {
-  scope?: CommandScope;
+  scope?: CommandScopeInput;
   language_code?: string;
 }
 
@@ -424,6 +489,11 @@ export interface BotOptions extends ClientOptions {
   polling?: boolean | PollingOptions;
   webhook?: false | WebhookServerOptions;
   allowed_updates?: UpdateType[];
+  /**
+   * The bot's own tag. `command()` uses it to skip `/command@otherbot` in groups;
+   * when omitted it is read once from `getMe()` on the first addressed command.
+   */
+  username?: string;
 }
 
 export interface BotSetupOptions {
@@ -431,8 +501,10 @@ export interface BotSetupOptions {
   description?: string;
   profilePhoto?: ProfilePhotoInput;
   commands?: BotCommand[];
-  commandScope?: CommandScope;
+  commandScope?: CommandScopeInput;
   languageCode?: string;
+  /** Extra command lists, for example separate private and group menus. */
+  commandSets?: BotCommandSet[];
   webhook?: SetWebhookOptions | false;
 }
 
@@ -444,6 +516,10 @@ export type TextHandler = (
   match: RegExpExecArray | null,
   update: Update,
 ) => void | Promise<void>;
+export type ChatMemberHandler = (
+  change: ChatMemberUpdated,
+  update: Update,
+) => void | Promise<void>;
 export type UpdateHandler = (update: Update) => void | Promise<void>;
 export type ErrorHandler = (error: unknown) => void | Promise<void>;
 export type PollingErrorHandler = (error: unknown) => void | Promise<void>;
@@ -452,6 +528,8 @@ export type BotEventMap = {
   message: MessageHandler;
   edited_message: EditedMessageHandler;
   callback_query: CallbackQueryHandler;
+  my_chat_member: ChatMemberHandler;
+  chat_member: ChatMemberHandler;
   update: UpdateHandler;
   polling_error: PollingErrorHandler;
   error: ErrorHandler;

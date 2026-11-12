@@ -2,8 +2,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 
 import { ApiClient } from './client.js';
 import { RiseonlyError } from './errors.js';
+import { parseCommand, serializeCommandScope } from './utils.js';
 import { createWebhookHandler } from './webhook.js';
 import type {
+  BotCommandSet,
   BotEvent,
   BotEventMap,
   BotOptions,
@@ -13,6 +15,7 @@ import type {
   PollingOptions,
   TextHandler,
   Update,
+  User,
   WebhookServerOptions,
 } from './types/index.js';
 
@@ -23,11 +26,15 @@ export class RiseonlyBot extends ApiClient {
     message: [],
     edited_message: [],
     callback_query: [],
+    my_chat_member: [],
+    chat_member: [],
     update: [],
     polling_error: [],
     error: [],
   };
 
+  private readonly configuredUsername?: string;
+  private botInfoTask?: Promise<User>;
   private pollingOptions: PollingOptions;
   private webhookOptions?: WebhookServerOptions;
   private polling = false;
@@ -38,6 +45,7 @@ export class RiseonlyBot extends ApiClient {
 
   constructor(token: string, options: BotOptions = {}) {
     super(token, options);
+    this.configuredUsername = options.username?.trim().replace(/^@/, '') || undefined;
     this.pollingOptions = normalizePollingOptions(options.polling);
     this.webhookOptions = options.webhook === false ? undefined : options.webhook;
     if (options.allowed_updates) {
@@ -81,6 +89,10 @@ export class RiseonlyBot extends ApiClient {
     return this.on(event, wrapper);
   }
 
+  /**
+   * Handles slash commands in private chats and groups. In a group, `/command@otherbot`
+   * is addressed to another bot and skipped; `/command` and `/command@thisbot` run.
+   */
   command(commands: string | string[], handler: BotEventMap['message']): this {
     const accepted = new Set(
       (Array.isArray(commands) ? commands : [commands])
@@ -88,15 +100,36 @@ export class RiseonlyBot extends ApiClient {
         .filter(Boolean),
     );
     return this.on('message', async (message, update) => {
-      const text = message.text?.trim();
-      if (!text?.startsWith('/')) {
+      const parsed = parseCommand(message.text);
+      if (!parsed || !accepted.has(parsed.command)) {
         return;
       }
-      const token = text.split(/\s+/, 1)[0]!.slice(1).split('@', 1)[0]!.toLowerCase();
-      if (accepted.has(token)) {
-        await handler(message, update);
+      if (parsed.target !== undefined && !(await this.isOwnTag(parsed.target))) {
+        return;
       }
+      await handler(message, update);
     });
+  }
+
+  /**
+   * Returns this bot's profile from `getMe()`, read once and cached.
+   */
+  async getBotInfo(refresh = false): Promise<User> {
+    if (refresh || !this.botInfoTask) {
+      const task = this.getMe();
+      this.botInfoTask = task;
+      task.catch(() => {
+        if (this.botInfoTask === task) {
+          this.botInfoTask = undefined;
+        }
+      });
+    }
+    return this.botInfoTask;
+  }
+
+  private async isOwnTag(target: string): Promise<boolean> {
+    const own = this.configuredUsername ?? (await this.getBotInfo()).username;
+    return own !== undefined && own.toLowerCase() === target.toLowerCase();
   }
 
   hears(trigger: string | RegExp, handler: TextHandler): this {
@@ -137,6 +170,17 @@ export class RiseonlyBot extends ApiClient {
   }
 
   async setup(options: BotSetupOptions): Promise<void> {
+    const commandSets: BotCommandSet[] = [
+      ...(options.commands
+        ? [{
+          commands: options.commands,
+          scope: options.commandScope,
+          languageCode: options.languageCode,
+        }]
+        : []),
+      ...(options.commandSets ?? []),
+    ];
+    assertDistinctCommandSets(commandSets);
     if (options.name !== undefined) {
       const current = await this.getMyName();
       if (current.name !== options.name) {
@@ -158,16 +202,16 @@ export class RiseonlyBot extends ApiClient {
         await this.setMyProfilePhoto({ photo: options.profilePhoto });
       }
     }
-    if (options.commands) {
+    for (const set of commandSets) {
       const current = await this.getMyCommands({
-        scope: options.commandScope,
-        language_code: options.languageCode,
+        scope: set.scope,
+        language_code: set.languageCode,
       });
-      if (!commandsEqual(current, options.commands)) {
+      if (!commandsEqual(current, set.commands)) {
         await this.setMyCommands({
-          commands: options.commands,
-          scope: options.commandScope,
-          language_code: options.languageCode,
+          commands: set.commands,
+          scope: set.scope,
+          language_code: set.languageCode,
         });
       }
     }
@@ -292,16 +336,23 @@ export class RiseonlyBot extends ApiClient {
     if (update.callback_query) {
       await this.emit('callback_query', update.callback_query, update);
     }
+    if (update.my_chat_member) {
+      await this.emit('my_chat_member', update.my_chat_member, update);
+    }
+    if (update.chat_member) {
+      await this.emit('chat_member', update.chat_member, update);
+    }
   }
 
   /**
-   * Sends a text message to a chat.
+   * Replies to a message in its chat, and in its topic when the group has topics.
    */
   async reply(message: Message, text: string, extra: Record<string, unknown> = {}): Promise<Message> {
     return this.sendMessage({
       chat_id: message.chat.id,
       text,
       reply_to_message_id: message.message_id,
+      ...(message.message_thread_id ? { message_thread_id: message.message_thread_id } : {}),
       ...extra,
     });
   }
@@ -396,6 +447,21 @@ function commandsEqual(
     command.command === right[index]?.command
     && command.description === right[index]?.description
   );
+}
+
+function assertDistinctCommandSets(sets: BotCommandSet[]): void {
+  const seen = new Set<string>();
+  for (const set of sets) {
+    const scope = serializeCommandScope(set.scope) ?? 'default';
+    const language = set.languageCode?.trim().toLowerCase() ?? '';
+    const key = `${scope}\n${language}`;
+    if (seen.has(key)) {
+      throw new Error(
+        `setup() got two command lists for scope "${scope}" and language "${language || 'any'}"`,
+      );
+    }
+    seen.add(key);
+  }
 }
 
 function normalizePollingOptions(

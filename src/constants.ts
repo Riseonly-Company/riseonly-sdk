@@ -71,4 +71,20 @@ export const COMMAND_SCOPES = [
   'all_chat_administrators',
 ] as const;
 
+/**
+ * Wire spelling of a command list scope. The app resolves the list shown in a chat
+ * from the most specific scope that has commands: `chat:<chat_id>`, then
+ * `all_group_chats` (groups and channels) or `all_private_chats`, then `default`.
+ * Administrator scopes are stored but not used by the app's command menu yet.
+ */
 export type CommandScope = (typeof COMMAND_SCOPES)[number] | `chat:${string}` | `chat_administrators:${string}`;
+
+export const CHAT_MEMBER_STATUSES = [
+  'creator',
+  'administrator',
+  'member',
+  'left',
+  'kicked',
+] as const;
+
+export type ChatMemberStatus = (typeof CHAT_MEMBER_STATUSES)[number];
