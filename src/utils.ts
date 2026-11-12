@@ -1,5 +1,56 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
+import type {
+  Chat,
+  CommandScopeInput,
+  ParsedCommand,
+} from './types/index.js';
+
+const COMMAND_RE = /^\/([A-Za-z0-9_]+)(?:@([A-Za-z0-9_]+))?(?:\s+([\s\S]*))?$/;
+const GROUP_CHAT_TYPES = new Set(['group', 'supergroup', 'channel']);
+
+/**
+ * Parses `/command`, `/command args` and the group form `/command@bot args`.
+ * Returns undefined when the text does not start with a command token.
+ */
+export function parseCommand(text: string | undefined): ParsedCommand | undefined {
+  const match = COMMAND_RE.exec(text?.trim() ?? '');
+  if (!match) {
+    return undefined;
+  }
+  return {
+    command: match[1]!.toLowerCase(),
+    target: match[2],
+    args: match[3]?.trim() ?? '',
+  };
+}
+
+/** True for group and channel chats, where several bots and people share one chat. */
+export function isGroupChat(chat: Pick<Chat, 'type'> | undefined): boolean {
+  return GROUP_CHAT_TYPES.has(chat?.type?.toLowerCase() ?? '');
+}
+
+/**
+ * Converts a command scope to its wire spelling. The object form
+ * `{ type: 'chat', chat_id }` becomes `chat:<chat_id>`, the key the app resolves.
+ */
+export function serializeCommandScope(scope: CommandScopeInput | undefined): string | undefined {
+  if (scope === undefined) {
+    return undefined;
+  }
+  if (typeof scope === 'string') {
+    return scope;
+  }
+  if (scope.type === 'chat') {
+    const chatId = scope.chat_id?.trim();
+    if (!chatId) {
+      throw new Error('chat_id is required for a chat command scope');
+    }
+    return `chat:${chatId}`;
+  }
+  return scope.type;
+}
+
 export interface InitDataFields {
   [key: string]: string;
 }

@@ -24,6 +24,58 @@ bot.action(/^track:/, (query) => bot.answer(query, 'Loading track…'));
 bot.catch((error) => console.error('Bot handler failed', error));
 ```
 
+## Groups
+
+Bots that can join groups receive group messages through the same `message`
+updates. With privacy mode on, a bot sees commands, mentions of it, replies to its
+messages and service messages; with privacy mode off, every message.
+
+```js
+import { RiseonlyBot, isGroupChat } from '@riseonly/sdk';
+
+const bot = new RiseonlyBot(process.env.BOT_TOKEN, { polling: true });
+
+// Runs for /roll and /roll@yourbot, skips /roll@otherbot in a group.
+bot.command('roll', async (message) => {
+  const value = 1 + Math.floor(Math.random() * 6);
+  // In a group with topics the reply stays in the message's topic.
+  await bot.reply(message, `🎲 ${value}`);
+});
+
+bot.on('my_chat_member', async (change) => {
+  if (isGroupChat(change.chat) && change.new_chat_member.status === 'member') {
+    await bot.sendMessage({ chat_id: change.chat.id, text: 'Hi! Type / to see my commands.' });
+  }
+});
+```
+
+`command()` reads the bot's tag once from `getMe()` when an addressed command
+arrives; pass `new RiseonlyBot(token, { username: 'yourbot' })` to skip that call.
+`parseCommand(text)` returns `{ command, target, args }` for your own routing.
+
+Typing `/` in a group shows the commands of every bot in it. Each bot's list is
+resolved from the most specific scope that has commands: the chat itself
+(`{ type: 'chat', chat_id }`), then `all_group_chats`, then `default`. Private chats
+use `all_private_chats`, then `default`.
+
+```js
+await bot.setup({
+  commands: [{ command: 'start', description: 'Start the bot' }],
+  commandScope: { type: 'all_private_chats' },
+  commandSets: [
+    { scope: { type: 'all_group_chats' }, commands: [{ command: 'roll', description: 'Roll a die' }] },
+    {
+      scope: { type: 'chat', chat_id: 'chat-id' },
+      languageCode: 'ru',
+      commands: [{ command: 'roll', description: 'Бросить кубик' }],
+    },
+  ],
+});
+```
+
+Pass `message_thread_id` to `sendMessage` and the media methods to post into a
+topic.
+
 ## Bot API client
 
 Use `ApiClient` when you only need HTTP methods without event loop helpers:

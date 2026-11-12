@@ -19,6 +19,7 @@ import type {
   Capabilities,
   Chat,
   ClientOptions,
+  CommandScopeInput,
   DeleteMessageOptions,
   DeleteMyCommandsOptions,
   DeleteWebhookOptions,
@@ -44,6 +45,7 @@ import type {
   User,
   WebhookInfo,
 } from './types/index.js';
+import { serializeCommandScope } from './utils.js';
 
 type QueryValue = string | number | boolean | undefined | null;
 
@@ -225,17 +227,17 @@ export class ApiClient {
 
   async setMyCommands(options: SetMyCommandsOptions): Promise<boolean> {
     const { request, payload } = splitRequestOptions(options);
-    return this.callMethod<boolean>('setMyCommands', payload, request);
+    return this.callMethod<boolean>('setMyCommands', withWireScope(payload), request);
   }
 
   async getMyCommands(options: GetMyCommandsOptions = {}): Promise<BotCommand[]> {
     const { request, payload } = splitRequestOptions(options);
-    return this.callMethod<BotCommand[]>('getMyCommands', payload, request);
+    return this.callMethod<BotCommand[]>('getMyCommands', withWireScope(payload), request);
   }
 
   async deleteMyCommands(options: DeleteMyCommandsOptions = {}): Promise<boolean> {
     const { request, payload } = splitRequestOptions(options);
-    return this.callMethod<boolean>('deleteMyCommands', payload, request);
+    return this.callMethod<boolean>('deleteMyCommands', withWireScope(payload), request);
   }
 
   async setMyName(options: SetMyNameOptions): Promise<boolean> {
@@ -378,6 +380,16 @@ function splitRequestOptions<T extends RequestOptions>(
   return {
     request: { requestId, signal, timeoutMs },
     payload: payload as Record<string, unknown>,
+  };
+}
+
+function withWireScope(payload: Record<string, unknown>): Record<string, unknown> {
+  if (payload.scope === undefined) {
+    return payload;
+  }
+  return {
+    ...payload,
+    scope: serializeCommandScope(payload.scope as CommandScopeInput),
   };
 }
 
