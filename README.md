@@ -24,6 +24,33 @@ bot.action(/^track:/, (query) => bot.answer(query, 'Loading track…'));
 bot.catch((error) => console.error('Bot handler failed', error));
 ```
 
+## Bot start links
+
+```ts
+import { getStartPayload } from '@riseonly/sdk';
+
+const link = await bot.getStartLink('4jzK82pQxsM');
+// https://riseonly.net/c/yourbot?start=4jzK82pQxsM
+
+bot.command('start', async (message) => {
+  const payload = getStartPayload(message);
+  // Resolve this opaque code in your application's own records.
+});
+```
+
+Without an argument, `getStartLink()` returns a link for a plain `/start`. With a
+parameter, pressing **Start** in the app sends `/start <parameter>` through the
+ordinary message update pipeline, for both polling and webhooks. Existing bot
+conversations can be started again with a different parameter.
+
+Parameters are case-sensitive, 1–64 ASCII characters: `A-Z`, `a-z`, `0-9`, `_`, `-`.
+Use an opaque random code instead of a user ID or secret. The parameter is user
+input: a manually typed `/start` is equivalent, so validate it in your application.
+The server selects the public host for its deployment environment and generates
+`/c/{bot_tag}?start=...`. The `/b/{bot_tag}` and `/chat/{bot_tag}` spellings also
+work, with or without `start`. Ordinary `/c/{chat_id}` links still open the chat.
+Mini App links remain `/b/{tag}/{slug}?startapp=...`.
+
 ## Groups
 
 Bots that can join groups receive group messages through the same `message`
@@ -135,10 +162,13 @@ await bot.setup({
   webhook: false,
 });
 
-await bot.launch();
+await bot.launch({
+  retryInitialInterval: 1_000,
+  retryMaxInterval: 30_000,
+});
 ```
 
-Use `webhook: { url, secret_token }` to configure webhook delivery instead. `bot.stop()` gracefully stops polling and the built-in webhook server.
+Polling retries transient failures with exponential backoff and full jitter. A successful polling cycle resets the backoff, while a server-provided `retry_after` takes precedence. Use `webhook: { url, secret_token }` to configure webhook delivery instead. `bot.stop()` gracefully stops polling and the built-in webhook server.
 
 Profile settings written by `setup()` use the same backend source of truth as the Riseonly owner settings screen, so changes are immediately visible in the app. Individual `setMyName`, `getMyName`, `setMyDescription`, `getMyDescription`, `setMyProfilePhoto`, and `removeMyProfilePhoto` methods are also available.
 

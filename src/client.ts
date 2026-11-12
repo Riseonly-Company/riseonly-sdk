@@ -155,6 +155,15 @@ export class ApiClient {
     return this.callMethod<User>('getMe', {}, options);
   }
 
+  /** Returns this bot's public link, optionally carrying an opaque start parameter. */
+  async getStartLink(startParam?: string, options?: RequestOptions): Promise<string> {
+    return this.callMethod<string>(
+      'getStartLink',
+      startParam === undefined ? {} : { start_param: startParam },
+      options,
+    );
+  }
+
   async sendMessage(options: SendMessageOptions): Promise<Message> {
     const { request, payload } = splitRequestOptions(options);
     return this.callMethod<Message>('sendMessage', payload, request);

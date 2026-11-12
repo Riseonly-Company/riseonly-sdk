@@ -49,6 +49,114 @@ describe('network resilience', () => {
     const timedClient = new ApiClient(token, { fetch: pendingFetch(), requestTimeoutMs: 5 });
     await expect(timedClient.getMe()).rejects.toBeInstanceOf(RiseonlyTimeoutError);
   });
+
+  it('backs polling failures off exponentially with a bounded full jitter window', async () => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.999_999);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      ok: false,
+      error_code: 503,
+      description: 'Bot service unavailable',
+    }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    const bot = new RiseonlyBot(token, { fetch: fetchMock as typeof fetch });
+
+    try {
+      await bot.startPolling({
+        timeout: 0,
+        retryInitialInterval: 1_000,
+        retryMaxInterval: 4_000,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      await vi.advanceTimersByTimeAsync(3_999);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    } finally {
+      await bot.stopPolling();
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('resets polling backoff after a successful cycle', async () => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.999_999);
+    const responses = [
+      { ok: false, error_code: 503, description: 'unavailable' },
+      { ok: true, result: [] },
+      { ok: false, error_code: 503, description: 'unavailable' },
+    ];
+    const fetchMock = vi.fn(async () => {
+      const body = responses.shift() ?? { ok: false, error_code: 503, description: 'unavailable' };
+      return new Response(JSON.stringify(body), {
+        status: body.ok ? 200 : 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    const bot = new RiseonlyBot(token, { fetch: fetchMock as typeof fetch });
+
+    try {
+      await bot.startPolling({
+        timeout: 0,
+        interval: 10,
+        retryInitialInterval: 1_000,
+        retryMaxInterval: 4_000,
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    } finally {
+      await bot.stopPolling();
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('honors retry_after and aborts a pending polling delay on stop', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      ok: false,
+      error_code: 429,
+      description: 'Too many requests',
+      parameters: { retry_after: 12 },
+    }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    const bot = new RiseonlyBot(token, { fetch: fetchMock as typeof fetch });
+
+    try {
+      await bot.startPolling({ timeout: 0 });
+      await vi.advanceTimersByTimeAsync(11_999);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await expect(bot.stopPolling()).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('developer helpers', () => {
